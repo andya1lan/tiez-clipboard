@@ -1,0 +1,82 @@
+name: Build Artifact (macOS)
+
+# Fork-local build: produces an unsigned Apple-Silicon .dmg and leaves it as a
+# workflow artifact. Creates no GitHub Release and needs no repository secrets
+# or environments, so it runs on a fork as-is.
+#
+# Why this exists alongside release-beta-macos.yml, rather than editing it:
+#   - scripts/configure-release.mjs hard-requires TIEZ_UPDATE_ENDPOINT,
+#     TIEZ_ANNOUNCEMENT_PING_URL and VITE_AI_DEFAULT_API_KEY when CI=true and
+#     exits 1 without them, so a fork cannot run the release path.
+#   - bundle.createUpdaterArtifacts is true, which makes Tauri demand
+#     TAURI_SIGNING_PRIVATE_KEY. It is switched off for this build only.
+#   - Apple Silicon only; the Intel leg is dropped to halve CI time.
+
+on:
+  workflow_dispatch:
+    inputs:
+      git_ref:
+        description: Branch or tag to build
+        required: true
+        default: fix/174-audio-route
+
+jobs:
+  build:
+    permissions:
+      contents: read
+    runs-on: macos-14 # Apple Silicon
+
+    env:
+      TIEZ_PLATFORM: macos
+      TIEZ_RELEASE_CHANNEL: beta
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.git_ref }}
+
+      - name: setup node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 20
+
+      - name: install Rust stable
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+          targets: aarch64-apple-darwin
+
+      - name: cache cargo and target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: ${{ runner.os }}-arm64-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-arm64-cargo-
+
+      - name: install frontend dependencies
+        run: npm ci
+
+      - name: disable updater artifacts for this build
+        run: |
+          node -e "
+            const fs = require('fs');
+            const p = 'src-tauri/tauri.conf.json';
+            const c = JSON.parse(fs.readFileSync(p, 'utf8'));
+            c.bundle.createUpdaterArtifacts = false;
+            fs.writeFileSync(p, JSON.stringify(c, null, 2));
+            console.log('createUpdaterArtifacts -> false');
+          "
+
+      - name: build
+        run: npm run tauri:build:mac-arm
+
+      - name: upload dmg
+        uses: actions/upload-artifact@v4
+        with:
+          name: TieZ-macos-arm64
+          if-no-files-found: error
+          retention-days: 14
+          path: src-tauri/target/**/bundle/dmg/*.dmg
