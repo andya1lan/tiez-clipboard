@@ -5,6 +5,9 @@ import {
   bindSoundAudioUnlock,
   ensureSoundAudioRunning,
   getSoundAudioContext,
+  scheduleSoundAudioSuspend,
+  setSoundEffectsWanted,
+  suspendSoundAudioContext,
   unlockSoundAudioContext
 } from "../lib/soundAudio";
 
@@ -22,13 +25,20 @@ export const useSoundEffects = ({
   useEffect(() => {
     if (!isTauriRuntime()) return;
 
+    // With sound effects off, no context is built at all, so TieZ never joins
+    // audio-route arbitration.
+    setSoundEffectsWanted(soundEnabled);
+    if (!soundEnabled) return;
+
     bindSoundAudioUnlock();
     void unlockSoundAudioContext();
 
-    const ctx = getSoundAudioContext();
-    if (!ctx) return;
-
-    const playCrispBeep = (durationSec = 0.1, baseFreqHz = 1400, volume = 0.35) => {
+    const playCrispBeep = (
+      ctx: AudioContext,
+      durationSec = 0.1,
+      baseFreqHz = 1400,
+      volume = 0.35
+    ) => {
       if (ctx.state === "suspended") void ctx.resume();
 
       const t0 = ctx.currentTime;
@@ -100,39 +110,50 @@ export const useSoundEffects = ({
       osc.stop(tEnd + 0.01);
     };
 
-    const unlisten = listen<string>("play-sound", (event) => {
-      if (!soundEnabled) return;
+    // The paste tail beep is scheduled 110 ms out. Without tracking it, a
+    // teardown in that window (sound switched off, volume changed) only suspends
+    // the context, and the callback then resumes it again for a stale beep.
+    let cancelled = false;
+    const pendingTails = new Set<ReturnType<typeof setTimeout>>();
 
+    const unlisten = listen<string>("play-sound", (event) => {
       const type = event.payload;
       if (type === "paste" && !pasteSoundEnabled) return;
       const masterVol = Math.min(1, Math.max(0, soundVolume));
 
-      const play = () => {
+      const play = (ctx: AudioContext) => {
         try {
           if (type === "copy") {
-            playCrispBeep(0.06, 500, Math.min(1, masterVol * 0.8));
+            playCrispBeep(ctx, 0.06, 500, Math.min(1, masterVol * 0.8));
           } else if (type === "paste") {
-            playCrispBeep(0.09, 950, Math.min(1, masterVol * 0.9));
-            setTimeout(() => {
-              if (ctx.state !== "closed") {
-                playCrispBeep(0.075, 1150, Math.min(1, masterVol * 0.75));
-              }
+            playCrispBeep(ctx, 0.09, 950, Math.min(1, masterVol * 0.9));
+            const tail = setTimeout(() => {
+              pendingTails.delete(tail);
+              if (cancelled || ctx.state === "closed") return;
+              playCrispBeep(ctx, 0.075, 1150, Math.min(1, masterVol * 0.75));
+              scheduleSoundAudioSuspend();
             }, 110);
+            pendingTails.add(tail);
           }
+          scheduleSoundAudioSuspend();
         } catch (e) {
           console.error("Sound play error", e);
         }
       };
 
       void ensureSoundAudioRunning().then((running) => {
-        if (running) {
-          play();
-        }
+        if (!running || cancelled) return;
+        const ctx = getSoundAudioContext();
+        if (ctx) play(ctx);
       });
     });
 
     return () => {
+      cancelled = true;
+      pendingTails.forEach(clearTimeout);
+      pendingTails.clear();
       unlisten.then((f) => f());
+      void suspendSoundAudioContext();
     };
   }, [soundEnabled, pasteSoundEnabled, soundVolume]);
 };
