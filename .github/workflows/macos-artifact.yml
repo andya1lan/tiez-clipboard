@@ -1,0 +1,73 @@
+name: macOS artifact (fork)
+
+# Fork-local build: an unsigned Apple-Silicon dmg left as a workflow artifact so
+# a branch can be installed and tested without cutting a release. It needs no
+# secrets, variables or environments, unlike release-beta-macos.yml, whose
+# configure-release step exits on a fork because TIEZ_UPDATE_ENDPOINT,
+# TIEZ_ANNOUNCEMENT_PING_URL and VITE_AI_DEFAULT_API_KEY are not set there.
+#
+# Updater artifacts are switched off for the build: signing them needs
+# TAURI_SIGNING_PRIVATE_KEY, which the fork has no reason to hold. The dmg
+# itself does not need it.
+
+on:
+  push:
+    branches: [ci/macos-artifact-build]
+  workflow_dispatch:
+    inputs:
+      git_ref:
+        description: Branch or tag to build
+        required: false
+        default: ci/macos-artifact-build
+
+concurrency:
+  group: macos-artifact-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    permissions:
+      contents: read
+    runs-on: macos-14 # Apple Silicon
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.git_ref || github.ref }}
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Disable updater artifacts for this build
+        run: |
+          node -e "
+            const fs = require('fs');
+            const p = 'src-tauri/tauri.conf.json';
+            const c = JSON.parse(fs.readFileSync(p, 'utf8'));
+            c.bundle.createUpdaterArtifacts = false;
+            fs.writeFileSync(p, JSON.stringify(c, null, 2) + '\n');
+            console.log('createUpdaterArtifacts -> false');
+          "
+
+      - name: Build arm64 bundle
+        run: npm run tauri:build:mac-arm
+
+      - name: Upload dmg
+        uses: actions/upload-artifact@v4
+        with:
+          name: TieZ-macos-arm64
+          if-no-files-found: error
+          retention-days: 14
+          path: src-tauri/target/**/bundle/dmg/*.dmg
