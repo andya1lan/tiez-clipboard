@@ -913,6 +913,16 @@ fn setup_main_window(app: &App, s: &StartupSettings) {
 }
 
 fn start_services(app: &App, s: &StartupSettings, app_handle: AppHandle) {
+    // Settle the sound directory before anything can ask for playback: it is set
+    // once per process, so a copy that arrives first would pin the temp-directory
+    // fallback and keep the cached sounds out of the app cache directory.
+    match app.path().app_cache_dir() {
+        Ok(cache_dir) => crate::services::ui_sound::set_sound_dir(cache_dir.join("sounds")),
+        Err(err) => eprintln!("[sound] app cache dir unavailable, using the temp dir: {err}"),
+    }
+    if s.sound_enabled {
+        crate::services::ui_sound::preload_ui_sounds(s.sound_volume);
+    }
     #[cfg(target_os = "macos")]
     crate::infrastructure::macos_api::window_tracker::start_window_tracking(app_handle.clone());
     #[cfg(target_os = "windows")]
@@ -920,9 +930,6 @@ fn start_services(app: &App, s: &StartupSettings, app_handle: AppHandle) {
     #[cfg(target_os = "macos")]
     crate::infrastructure::macos_api::paste_key_monitor::start_paste_key_monitor();
     crate::services::clipboard::start_clipboard_monitor(app_handle.clone());
-    if s.sound_enabled {
-        crate::services::ui_sound::preload_ui_sounds();
-    }
     crate::services::mqtt_sub::start_mqtt_client(app_handle.clone());
     crate::services::cloud_sync::start_cloud_sync_client(app_handle.clone());
     start_edge_docking_monitor(app_handle.clone());

@@ -58,12 +58,20 @@ pub fn play_ui_sound_at_volume(kind: &str, volume: f64) {
     }
 }
 
-/// Preload native sound assets when sound effects are enabled.
-pub fn preload_ui_sounds() {
+/// Where the native playback path keeps its volume-scaled sound files.
+pub fn set_sound_dir(dir: std::path::PathBuf) {
     #[cfg(target_os = "macos")]
-    {
-        crate::infrastructure::macos_api::sound::preload_clipboard_sounds();
-    }
+    crate::infrastructure::macos_api::sound::set_sound_dir(dir);
+    #[cfg(not(target_os = "macos"))]
+    let _ = dir;
+}
+
+/// Register native sound assets ahead of the first copy when sound effects are on.
+pub fn preload_ui_sounds(volume: f64) {
+    #[cfg(target_os = "macos")]
+    crate::infrastructure::macos_api::sound::preload_clipboard_sounds(volume);
+    #[cfg(not(target_os = "macos"))]
+    let _ = volume;
 }
 
 /// Play paste feedback after the synthetic Cmd+V (all native paste paths).
