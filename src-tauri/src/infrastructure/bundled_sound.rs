@@ -44,10 +44,16 @@ fn play_wav_on_windows(wav: &'static [u8], volume: f32) {
         let buffer = scale_wav_volume(wav, volume).unwrap_or_else(|_| wav.to_vec());
 
         unsafe {
+            // Deliberately synchronous (the Win32 default, SND_SYNC == 0): with
+            // SND_MEMORY the audio system keeps reading from `buffer` for the whole
+            // sound, so returning early would let this thread drop the buffer
+            // mid-playback. Blocking costs nothing here — that is what the thread
+            // is for. The full-volume path above can stay async because it hands
+            // over a &'static slice.
             let _ = PlaySoundW(
                 PCWSTR(buffer.as_ptr() as *const u16),
                 None,
-                SND_MEMORY | SND_NODEFAULT | SND_ASYNC,
+                SND_MEMORY | SND_NODEFAULT,
             );
         }
     });
