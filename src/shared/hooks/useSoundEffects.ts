@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { isTauriRuntime } from "../lib/tauriRuntime";
+import { isWindowsPlatform } from "../lib/platform";
 import {
   bindSoundAudioUnlock,
   ensureSoundAudioRunning,
@@ -24,6 +25,12 @@ export const useSoundEffects = ({
 }: UseSoundEffectsOptions) => {
   useEffect(() => {
     if (!isTauriRuntime()) return;
+
+    // "play-sound" is only ever emitted by the Windows keyboard hook; every other
+    // platform plays its feedback natively from Rust. Building a context here
+    // would leave one open for events that never arrive, which is what made TieZ
+    // squat on the macOS audio route and silence other apps (#174).
+    if (!isWindowsPlatform()) return;
 
     // With sound effects off, no context is built at all, so TieZ never joins
     // audio-route arbitration.
