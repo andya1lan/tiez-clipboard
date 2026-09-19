@@ -412,7 +412,12 @@ export const useSettingsPostInit = ({
     setPasteSoundEnabled(pasteSoundOn);
     invoke("set_paste_sound_enabled", { enabled: pasteSoundOn }).catch(console.error);
     if (settings["app.sound_volume"]) {
-      setSoundVolume(parseFloat(settings["app.sound_volume"]) || 1.0);
+      // Volume is a 0..1 fraction, but installs older than the 0..1 slider
+      // stored it as a 0..100 percentage. Anything above 1 is one of those, so
+      // scale it down instead of rendering it as e.g. 7000%.
+      const raw = parseFloat(settings["app.sound_volume"]);
+      const fraction = Number.isFinite(raw) ? (raw > 1 ? raw / 100 : raw) : 1.0;
+      setSoundVolume(Math.min(1, Math.max(0, fraction)));
     }
     if (settings["ai_enabled"]) setAiEnabled(settings["ai_enabled"] === "true");
     if (settings["ai_target_lang"]) setAiTargetLang(settings["ai_target_lang"]);

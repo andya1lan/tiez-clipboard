@@ -468,6 +468,7 @@ fn load_settings(repo: &impl SettingsRepository) -> StartupSettings {
             .get("app.sound_volume")
             .unwrap_or(Some("1.0".to_string()))
             .and_then(|v| v.parse::<f64>().ok())
+            .map(crate::services::ui_sound::normalize_sound_volume)
             .unwrap_or(1.0),
     }
 }

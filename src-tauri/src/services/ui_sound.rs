@@ -17,6 +17,17 @@ fn paste_sound_enabled(settings: &SettingsState, app_handle: &AppHandle) -> bool
         .unwrap_or(true)
 }
 
+/// Volume is a 0..1 fraction, but installs older than the 0..1 slider stored it
+/// as a 0..100 percentage. Anything above 1 is one of those, so scale it back
+/// down instead of letting the clamp turn every legacy value into full volume.
+pub fn normalize_sound_volume(raw: f64) -> f64 {
+    if !raw.is_finite() {
+        return 1.0;
+    }
+    let fraction = if raw > 1.0 { raw / 100.0 } else { raw };
+    fraction.clamp(0.0, 1.0)
+}
+
 pub fn play_ui_sound(app_handle: &AppHandle, kind: &str) {
     let settings = app_handle.state::<SettingsState>();
     if !settings.sound_enabled.load(Ordering::Relaxed) {

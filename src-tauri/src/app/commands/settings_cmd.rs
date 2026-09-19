@@ -126,7 +126,7 @@ pub fn save_setting(
     db_state: State<'_, DbState>,
     settings_state: State<'_, crate::app_state::SettingsState>,
     key: String,
-    value: String,
+    mut value: String,
 ) -> AppResult<()> {
     match key.as_str() {
         "app.arrow_key_selection" => {
@@ -151,9 +151,13 @@ pub fn save_setting(
         }
         "app.sound_volume" => {
             if let Ok(v) = value.parse::<f64>() {
+                let normalized = crate::services::ui_sound::normalize_sound_volume(v);
                 if let Ok(mut guard) = settings_state.sound_volume.lock() {
-                    *guard = v;
+                    *guard = normalized;
                 }
+                // Persist what the app actually uses; storing the raw value would
+                // leave a legacy percentage in the database to migrate again.
+                value = normalized.to_string();
             }
         }
         "app.persistent" => {
